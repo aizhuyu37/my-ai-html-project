@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>术后患者回访系统</title>
+    
+    <!-- 引入 Tailwind CSS 用于页面样式 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 引入 FontAwesome 图标库 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- 引入 React 和 ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- 引入 Babel 用于在浏览器中解析 JSX 代码 -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-up {
+            animation: fadeInUp 0.3s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 font-sans text-slate-800">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // ==========================================
+        // 模拟后端服务 (使用 LocalStorage)
+        // ==========================================
+        const MockBackend = {
+            getUsers: () => JSON.parse(localStorage.getItem('medical_users') || '[]'),
+            saveUser: (user) => {
+                const users = MockBackend.getUsers();
+                users.push(user);
+                localStorage.setItem('medical_users', JSON.stringify(users));
+            },
+            getRecords: () => JSON.parse(localStorage.getItem('medical_records') || '[]'),
+            saveRecord: (record) => {
+                const records = MockBackend.getRecords();
+                records.unshift(record); // 新记录插在最前面
+                try {
+                    localStorage.setItem('medical_records', JSON.stringify(records));
+                    return true;
+                } catch (e) {
+                    // 处理 LocalStorage 配额超出的情况 (通常是因为图片太大)
+                    alert("本地存储空间已满！可能是由于保存了太多高清图片。请清理浏览器缓存或联系技术支持。");
+                    return false;
+                }
+            }
+        };
+
+        // ==========================================
+        // 主应用组件
+        // ==========================================
+        const App = () => {
+            const [currentUser, setCurrentUser] = useState(() => {
+                return JSON.parse(localStorage.getItem('medical_current_user') || 'null');
+            });
+
+            useEffect(() => {
+                if (currentUser) {
+                    localStorage.setItem('medical_current_user', JSON.stringify(currentUser));
+                } else {
+                    localStorage.removeItem('medical_current_user');
+                }
+            }, [currentUser]);
+
+            if (!currentUser) return <AuthScreen onLogin={setCurrentUser} />;
+            return <MainDashboard user={currentUser} onLogout={() => setCurrentUser(null)} />;
+        };
+
+        // ==========================================
+        // 登录/注册屏幕
+        // ==========================================
+        const AuthScreen = ({ onLogin }) => {
+            const [isLoginMode, setIsLoginMode] = useState(true);
+            const [realName, setRealName] = useState('');
+            const [phone, setPhone] = useState('');
+            const [password, setPassword] = useState('');
+            const [isAdminRegister, setIsAdminRegister] = useState(false);
+            const [adminCode, setAdminCode] = useState('');
+            const [errorMsg, setErrorMsg] = useState('');
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                setErrorMsg('');
+
+                if (phone.length < 11) { setErrorMsg('请输入11位手机号码'); return; }
+                if (password.length < 6) { setErrorMsg('密码不能少于6位'); return; }
+
+                const users = MockBackend.getUsers();
+
+                if (isLoginMode) {
+                    const user = users.find(u => u.phone === phone && u.password === password);
+                    if (user) onLogin(user);
+                    else setErrorMsg('手机号或密码错误');
+                } else {
+                    if (!realName.trim()) { setErrorMsg('请输入真实姓名'); return; }
+                    if (users.find(u => u.phone === phone)) { setErrorMsg('该手机号已被注册，请直接登录'); return; }
+
+                    let role = 'user';
+                    if (isAdminRegister) {
+                        if (adminCode !== 'admin123') { setErrorMsg('无效的授权邀请码'); return; }
+                        role = 'admin';
+                    }
+
+                    const newUser = {
+                        id: 'uid_' + Date.now(),
+                        realName: realName.trim(),
+                        phone: phone,
+                        password: password,
+                        role: role
+                    };
+                    MockBackend.saveUser(newUser);
+                    onLogin(newUser);
+                }
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col justify-center items-center px-4">
+                    <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-100 p-8 animate-fade-in-up">
+                        <div className="text-center mb-8">
+                            <div className="mx-auto bg-blue-600 w-12 h-12 rounded-xl flex items-center justify-center text-white mb-4 shadow-lg shadow-blue-200">
+                                <i className="fas fa-stethoscope text-2xl"></i>
+                            </div>
+                            <h1 className="text-2xl font-bold text-slate-800">术后回访系统</h1>
+                            <p className="text-sm text-slate-500 mt-2">{isLoginMode ? '欢迎回来，请登录您的账号' : '注册新账号以开始使用'}</p>
+                        </div>
+
+                        {errorMsg && <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100"><i className="fas fa-exclamation-circle mr-2"></i>{errorMsg}</div>}
+
+                        <form onSubmit={handleSubmit} className="space-y-5">
+                            {!isLoginMode && (
+                                <div><label className="block text-sm font-medium text-slate-700 mb-1">真实姓名</label><input type="text" required value={realName} onChange={(e)=>setRealName(e.target.value)} className="block w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="请输入真实姓名" /></div>
+                            )}
+                            <div><label className="block text-sm font-medium text-slate-700 mb-1">手机号</label><input type="tel" required value={phone} onChange={(e)=>setPhone(e.target.value)} className="block w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="请输入11位手机号" /></div>
+                            <div><label className="block text-sm font-medium text-slate-700 mb-1">密码</label><input type="password" required value={password} onChange={(e)=>setPassword(e.target.value)} className="block w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="请输入密码(最少6位)" /></div>
+
+                            {!isLoginMode && (
+                                <div className="pt-2 border-t border-slate-100">
+                                    <label className="flex items-center gap-2 cursor-pointer mb-3">
+                                        <input type="checkbox" checked={isAdminRegister} onChange={(e) => setIsAdminRegister(e.target.checked)} className="rounded text-blue-600 w-4 h-4" />
+                                        <span className="text-sm text-slate-600 font-medium">科室管理人员注册通道</span>
+                                    </label>
+                                    {isAdminRegister && (
+                                        <input type="password" required value={adminCode} onChange={(e)=>setAdminCode(e.target.value)} className="block w-full px-4 py-2.5 border border-amber-200 bg-amber-50 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none" placeholder="请输入授权邀请码" />
+                                    )}
+                                </div>
+                            )}
+                            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium shadow-sm transition-all mt-4">{isLoginMode ? '登 录' : '注 册'}</button>
+                        </form>
+                        <div className="mt-6 text-center">
+                            <button onClick={() => {setIsLoginMode(!isLoginMode); setErrorMsg(''); setIsAdminRegister(false); setAdminCode(''); setRealName('');}} className="text-sm text-blue-600 hover:underline font-medium">
+                                {isLoginMode ? '没有账号？点击注册新账号' : '已有账号？返回登录'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ==========================================
+        // 主控制台 (包含填表、历史记录、数据分析)
+        // ==========================================
+        const MainDashboard = ({ user, onLogout }) => {
+            const [activeTab, setActiveTab] = useState('new'); // new, history, analysis
+            const [records, setRecords] = useState([]);
+            const [showToast, setShowToast] = useState(false);
+            const fileInputRef = useRef(null);
+
+            // 加载数据并根据权限过滤
+            useEffect(() => {
+                let allRecords = MockBackend.getRecords();
+                if (user.role !== 'admin') {
+                    allRecords = allRecords.filter(r => r.authorId === user.id);
+                }
+                setRecords(allRecords);
+            }, [user, activeTab]);
+
+            // 表单状态初始化
+            const initialFormState = {
+                patientName: '', attendingDoctor: '', phone: '', surgeryType: '', surgeryDate: '',
+                q1_symptoms: '无', q2_activity: '否，活动自如', q3_status: '良好',
+                q4_wound: '正常', q5_medication: '按时使用', q6_exudate: '无',
+                q7_implant: '无异常', remark: '', photoBase64: ''
+            };
+            const [formData, setFormData] = useState(initialFormState);
+
+            const handleInputChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+
+            // 图片上传与压缩处理（防止填爆本地存储）
+            const handleImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        // 设置最大宽高以压缩图片
+                        const MAX_WIDTH = 800;
+                        const MAX_HEIGHT = 800;
+                        let width = img.width;
+                        let height = img.height;
+
+                        if (width > height) {
+                            if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+                        } else {
+                            if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
+                        }
+                        canvas.width = width; canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        
+                        // 导出为 JPG 并设置压缩质量 0.7
+                        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+                        setFormData(prev => ({ ...prev, photoBase64: compressedBase64 }));
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                const newRecord = {
+                    ...formData,
+                    id: 'rec_' + Date.now(),
+                    timestamp: Date.now(),
+                    followUpTime: new Date().toLocaleString(),
+                    authorId: user.id,
+                    authorName: user.realName,
+                    authorPhone: user.phone
+                };
+
+                const success = MockBackend.saveRecord(newRecord);
+                if(success) {
+                    setFormData(initialFormState);
+                    setShowToast(true);
+                    setTimeout(() => setShowToast(false), 3000);
+                    setActiveTab('history');
+                }
+            };
+
+            const exportToCSV = () => {
+                if (user.role !== 'admin') return alert("您没有导出数据的权限。");
+                if (records.length === 0) return;
+                const headers = [
+                    '录入人姓名', '录入人手机', '回访时间', '患者姓名', '联系电话', '主治医生', '手术/治疗术式', '手术/治疗时间', 
+                    '1.局部症状', '2.日常活动', '3.精神/食欲/睡眠', '4.伤口情况', 
+                    '5.用药情况', '6.异常突发', '7.植入物', '补充备注'
+                ];
+                let csvContent = '\uFEFF' + headers.join(',') + '\n';
+                records.forEach(r => {
+                    const row = [
+                        r.authorName, r.authorPhone, r.followUpTime, r.patientName, r.phone, r.attendingDoctor, r.surgeryType, r.surgeryDate,
+                        r.q1_symptoms, r.q2_activity, r.q3_status, r.q4_wound,
+                        r.q5_medication, r.q6_exudate, r.q7_implant, (r.remark || '').replace(/\n/g, ' ')
+                    ];
+                    csvContent += row.map(cell => `"${String(cell || '').replace(/"/g, '""')}"`).join(',') + '\n';
+                });
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = `患者回访记录汇总_${new Date().toLocaleDateString().replace(/\//g, '')}.csv`;
+                link.click();
+            };
+
+            const RadioGroup = ({ name, options, label, required = true }) => (
+                <div className="mb-6">
+                    <label className="block text-sm font-medium text-slate-700 mb-3">{label} {required && <span className="text-red-500">*</span>}</label>
+                    <div className="flex flex-wrap gap-3">
+                        {options.map(option => (
+                            <label key={option} className={`flex items-center px-4 py-2 border rounded-lg cursor-pointer transition-all ${formData[name] === option ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                <input type="radio" name={name} value={option} checked={formData[name] === option} onChange={handleInputChange} className="hidden" />
+                                <span className="text-sm">{option}</span>
+                            </label>
+                        ))}
+                    </div>
+                </div>
+            );
+
+            // 数据分析面板的计算逻辑
+            const renderAnalytics = () => {
+                if(records.length === 0) return <div className="text-center py-12 text-slate-400">暂无数据进行分析</div>;
+
+                const stats = {};
+                records.forEach(r => {
+                    const type = r.surgeryType || '未分类术式';
+                    if (!stats[type]) {
+                        stats[type] = { total: 0, painOrFever: 0, woundIssue: 0, exudate: 0 };
+                    }
+                    stats[type].total++;
+                    if (r.q1_symptoms !== '无') stats[type].painOrFever++;
+                    if (r.q4_wound !== '正常') stats[type].woundIssue++;
+                    if (r.q6_exudate !== '无') stats[type].exudate++;
+                });
+
+                return Object.keys(stats).map(type => {
+                    const data = stats[type];
+                    const painRate = Math.round((data.painOrFever / data.total) * 100);
+                    const woundRate = Math.round((data.woundIssue / data.total) * 100);
+                    const exudateRate = Math.round((data.exudate / data.total) * 100);
+
+                    return (
+                        <div key={type} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 mb-4 animate-fade-in-up">
+                            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                <i className="fas fa-chart-pie text-blue-500"></i> {type} 
+                                <span className="text-sm font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">总样本数: {data.total} 例</span>
+                            </h3>
+                            
+                            <div className="space-y-4">
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-slate-600">疼痛/肿胀/发热 报告率</span>
+                                        <span className="font-medium text-slate-800">{data.painOrFever} 例 ({painRate}%)</span>
+                                    </div>
+                                    <div className="w-full bg-slate-100 rounded-full h-2">
+                                        <div className="bg-amber-400 h-2 rounded-full" style={{ width: `${painRate}%` }}></div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-slate-600">伤口红肿/破溃 报告率</span>
+                                        <span className="font-medium text-slate-800">{data.woundIssue} 例 ({woundRate}%)</span>
+                                    </div>
+                                    <div className="w-full bg-slate-100 rounded-full h-2">
+                                        <div className="bg-red-400 h-2 rounded-full" style={{ width: `${woundRate}%` }}></div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-slate-600">异常渗液/异味 报告率</span>
+                                        <span className="font-medium text-slate-800">{data.exudate} 例 ({exudateRate}%)</span>
+                                    </div>
+                                    <div className="w-full bg-slate-100 rounded-full h-2">
+                                        <div className="bg-purple-400 h-2 rounded-full" style={{ width: `${exudateRate}%` }}></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                });
+            };
+
+            return (
+                <div className="pb-12">
+                    <header className="bg-white shadow-sm sticky top-0 z-10">
+                        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="bg-blue-600 p-2 rounded-lg text-white w-10 h-10 flex items-center justify-center">
+                                    <i className="fas fa-stethoscope text-xl"></i>
+                                </div>
+                                <h1 className="text-xl font-bold text-slate-800 hidden sm:block">术后患者回访系统</h1>
+                            </div>
+                            
+                            <div className="flex items-center gap-4">
+                                <div className="flex flex-col items-end">
+                                    <span className="text-sm font-bold text-slate-700 flex items-center gap-1">
+                                        {user.role === 'admin' ? <i className="fas fa-user-shield text-amber-500"></i> : <i className="fas fa-user-nurse text-blue-500"></i>}
+                                        {user.realName}
+                                    </span>
+                                    <span className="text-xs text-slate-400">
+                                        {user.role === 'admin' ? '管理员 (可查看全科室)' : '医护人员 (仅查看自己)'}
+                                    </span>
+                                </div>
+                                <button onClick={onLogout} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="退出登录">
+                                    <i className="fas fa-sign-out-alt text-lg"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
+                        <div className="flex bg-slate-100 p-1 rounded-lg w-max mb-6 overflow-x-auto">
+                            <button onClick={() => setActiveTab('new')} className={`flex whitespace-nowrap items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'new' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                                <i className="fas fa-plus-circle"></i> 新建回访
+                            </button>
+                            <button onClick={() => setActiveTab('history')} className={`flex whitespace-nowrap items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'history' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                                <i className="fas fa-clipboard-list"></i> 回访记录
+                            </button>
+                            {user.role === 'admin' && (
+                                <button onClick={() => setActiveTab('analysis')} className={`flex whitespace-nowrap items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'analysis' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                                    <i className="fas fa-chart-line"></i> 数据分析
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+                        
+                        {/* 1. 填报表单 */}
+                        {activeTab === 'new' && (
+                            <form onSubmit={handleSubmit} className="space-y-6 animate-fade-in-up">
+                                <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-100">
+                                    <div className="flex items-center gap-2 mb-6 border-b border-slate-100 pb-4">
+                                        <i className="fas fa-user-injured text-blue-500 text-lg"></i>
+                                        <h2 className="text-lg font-semibold text-slate-800">基本信息</h2>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-2">患者姓名 *</label>
+                                            <input type="text" name="patientName" required value={formData.patientName} onChange={handleInputChange} className="block w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 sm:text-sm outline-none" placeholder="输入患者姓名" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-2">联系电话 *</label>
+                                            <input type="tel" name="phone" required value={formData.phone} onChange={handleInputChange} className="block w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 sm:text-sm outline-none" placeholder="输入患者联系电话" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-2">主治医生 *</label>
+                                            <input type="text" name="attendingDoctor" required value={formData.attendingDoctor} onChange={handleInputChange} className="block w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 sm:text-sm outline-none" placeholder="输入主治医生姓名" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-2">手术/治疗术式 *</label>
+                                            <input type="text" name="surgeryType" required value={formData.surgeryType} onChange={handleInputChange} className="block w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 sm:text-sm outline-none" placeholder="例如：腹腔镜阑尾切除术" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-2">手术/治疗时间 *</label>
+                                            <input type="date" name="surgeryDate" required value={formData.surgeryDate} onChange={handleInputChange} className="block w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 sm:text-sm outline-none" />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-100">
+                                    <div className="flex items-center gap-2 mb-6 border-b border-slate-100 pb-4">
+                                        <i className="fas fa-file-medical-alt text-blue-500 text-lg"></i>
+                                        <h2 className="text-lg font-semibold text-slate-800">健康状况评估</h2>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <RadioGroup name="q1_symptoms" label="1. 手术/穿刺/治疗部位有没有疼痛、肿胀、发热、渗液、出血等？" options={['无', '轻微疼痛/肿胀', '有发热', '有渗液/出血', '其他异常']} />
+                                        <RadioGroup name="q2_activity" label="2. 日常活动（抬手、走路、睡觉等）是否受影响？" options={['否，活动自如', '稍微受限', '严重受限，影响生活']} />
+                                        <RadioGroup name="q3_status" label="3. 最近整体精神、食欲、睡眠好不好？" options={['良好', '一般', '精神差', '食欲差', '睡眠差']} />
+                                        <RadioGroup name="q4_wound" label="4. 伤口局部皮肤颜色、有无红肿破溃？" options={['正常', '轻微发红', '有明显红肿', '有破溃']} />
+                                        <RadioGroup name="q5_medication" label="5. 外用药物有没有按时使用？" options={['按时使用', '偶尔忘记', '未使用', '无外用药物']} />
+                                        <RadioGroup name="q6_exudate" label="6. 有没有突然增多、变黄、异味、疼痛加重等情况？" options={['无', '渗液增多/变黄', '有异味', '疼痛加重']} />
+                                        <RadioGroup name="q7_implant" label="7. 植入物位置是否异常、是否有明显紧绷感、疼痛？" options={['无异常', '有紧绷感', '有疼痛感', '感觉位置异常', '无植入物']} />
+                                        
+                                        <div className="mt-6 pt-4 border-t border-slate-50">
+                                            <label className="block text-sm font-medium text-slate-700 mb-2">其他补充备注 (选填)</label>
+                                            <textarea name="remark" value={formData.remark} onChange={handleInputChange} rows="3" className="block w-full p-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 sm:text-sm outline-none mb-3" placeholder="记录其他补充备注 (选填)..."></textarea>
+                                            
+                                            {/* 图片上传区域 */}
+                                            <div className="mt-2">
+                                                <input 
+                                                    type="file" 
+                                                    accept="image/*" 
+                                                    capture="environment" // 在移动端优先调用后置摄像头
+                                                    className="hidden" 
+                                                    ref={fileInputRef}
+                                                    onChange={handleImageUpload}
+                                                />
+                                                {!formData.photoBase64 ? (
+                                                    <button type="button" onClick={() => fileInputRef.current.click()} className="flex items-center justify-center gap-2 border-2 border-dashed border-slate-300 text-slate-500 rounded-lg w-full sm:w-64 h-24 hover:bg-slate-50 hover:border-blue-400 hover:text-blue-500 transition-colors">
+                                                        <i className="fas fa-camera text-xl"></i>
+                                                        <span className="text-sm font-medium">现场拍摄 / 上传照片</span>
+                                                    </button>
+                                                ) : (
+                                                    <div className="relative inline-block border border-slate-200 rounded-lg p-2 bg-slate-50">
+                                                        <img src={formData.photoBase64} alt="患者照片" className="h-32 w-auto object-cover rounded" />
+                                                        <button type="button" onClick={() => setFormData(prev => ({...prev, photoBase64: ''}))} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center shadow-md hover:bg-red-600">
+                                                            <i className="fas fa-times text-xs"></i>
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="flex flex-col-reverse sm:flex-row items-center justify-between gap-4 pt-4">
+                                    {/* 科室电话 */}
+                                    <div className="flex items-center gap-2 text-slate-600 bg-blue-50/50 border border-blue-100 px-5 py-3 rounded-lg w-full sm:w-auto shadow-sm">
+                                        <i className="fas fa-headset text-blue-500 text-lg"></i>
+                                        <span className="font-medium text-sm">科室服务热线：<span className="text-blue-700 text-lg font-bold tracking-wide">0000-00000000</span></span>
+                                    </div>
+
+                                    <button type="submit" className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-8 py-3.5 rounded-lg font-medium shadow-md shadow-blue-200 transition-all flex justify-center items-center gap-2">
+                                        <i className="fas fa-check-circle"></i> 保存回访记录
+                                    </button>
+                                </div>
+                            </form>
+                        )}
+
+                        {/* 2. 记录列表 */}
+                        {activeTab === 'history' && (
+                            <div className="space-y-4 animate-fade-in-up">
+                                <div className="flex justify-between items-center mb-4 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                                    <span className="text-sm text-slate-600 font-medium flex items-center gap-2">
+                                        <i className="fas fa-database text-blue-500"></i>
+                                        {user.role === 'admin' ? '全科室回访记录' : '我的回访记录'} (共 {records.length} 条)
+                                    </span>
+                                    {user.role === 'admin' && records.length > 0 && (
+                                        <button onClick={exportToCSV} className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 shadow-sm">
+                                            <i className="fas fa-file-excel"></i> 导出表格
+                                        </button>
+                                    )}
+                                </div>
+
+                                {records.length === 0 ? (
+                                    <div className="text-center py-12 text-slate-400 bg-white rounded-xl border border-slate-100">
+                                        <i className="fas fa-folder-open text-4xl mb-3 text-slate-200"></i>
+                                        <p>暂无相关回访记录</p>
+                                    </div>
+                                ) : (
+                                    records.map(record => (
+                                        <div key={record.id} className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden relative">
+                                            {user.role === 'admin' && (
+                                                <div className="absolute top-0 right-0 bg-blue-50 text-blue-700 text-xs px-3 py-1.5 rounded-bl-xl font-medium border-b border-l border-blue-100 flex items-center gap-1">
+                                                    <i className="fas fa-user-edit"></i> 录入人: {record.authorName} ({record.authorPhone})
+                                                </div>
+                                            )}
+                                            
+                                            <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-50 gap-4 mt-2">
+                                                <div>
+                                                    <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                                        {record.patientName} <span className="text-sm font-normal text-slate-500 flex items-center gap-1"><i className="fas fa-phone-alt text-xs"></i> {record.phone}</span>
+                                                    </h3>
+                                                    <div className="text-sm text-slate-600 mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                                                        <span className="flex items-center gap-1 text-slate-700 font-medium"><i className="fas fa-user-md text-blue-500 text-xs"></i> 主治: {record.attendingDoctor}</span>
+                                                        <span className="flex items-center gap-1"><i className="fas fa-heartbeat text-blue-500 text-xs"></i> {record.surgeryType}</span>
+                                                        <span className="flex items-center gap-1"><i className="far fa-calendar-alt text-blue-500 text-xs"></i> {record.surgeryDate}</span>
+                                                    </div>
+                                                </div>
+                                                <div className="text-xs text-slate-400 flex items-center gap-1 bg-slate-50 px-3 py-1.5 rounded-full w-max">
+                                                    <i className="far fa-clock"></i> {record.followUpTime}
+                                                </div>
+                                            </div>
+                                            <div className="p-5 bg-slate-50/50">
+                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+                                                    <div className="flex flex-col gap-1"><span className="text-slate-500 text-xs">1. 局部症状</span><span className={`font-medium ${record.q1_symptoms !== '无' ? 'text-amber-600' : 'text-slate-700'}`}>{record.q1_symptoms}</span></div>
+                                                    <div className="flex flex-col gap-1"><span className="text-slate-500 text-xs">2. 日常活动</span><span className={`font-medium ${record.q2_activity !== '否，活动自如' ? 'text-amber-600' : 'text-slate-700'}`}>{record.q2_activity}</span></div>
+                                                    <div className="flex flex-col gap-1"><span className="text-slate-500 text-xs">3. 精神/食欲</span><span className="font-medium text-slate-700">{record.q3_status}</span></div>
+                                                    <div className="flex flex-col gap-1"><span className="text-slate-500 text-xs">4. 伤口情况</span><span className={`font-medium ${record.q4_wound !== '正常' ? 'text-amber-600' : 'text-slate-700'}`}>{record.q4_wound}</span></div>
+                                                    <div className="flex flex-col gap-1"><span className="text-slate-500 text-xs">5. 用药情况</span><span className="font-medium text-slate-700">{record.q5_medication}</span></div>
+                                                    <div className="flex flex-col gap-1"><span className="text-slate-500 text-xs">6. 异常突发</span><span className={`font-medium ${record.q6_exudate !== '无' ? 'text-red-500' : 'text-slate-700'}`}>{record.q6_exudate}</span></div>
+                                                    <div className="flex flex-col gap-1"><span className="text-slate-500 text-xs">7. 植入物</span><span className="font-medium text-slate-700">{record.q7_implant}</span></div>
+                                                </div>
+
+                                                {/* 备注与图片展示区域 */}
+                                                {(record.remark || record.photoBase64) && (
+                                                    <div className="mt-4 pt-4 border-t border-slate-200/60 flex flex-col sm:flex-row gap-4">
+                                                        {record.remark && (
+                                                            <div className="flex-1 flex flex-col gap-1">
+                                                                <span className="text-slate-500 text-xs">补充备注</span>
+                                                                <span className="font-medium text-sm text-slate-700 bg-white p-3 rounded-lg border border-slate-100 shadow-sm">{record.remark}</span>
+                                                            </div>
+                                                        )}
+                                                        {record.photoBase64 && (
+                                                            <div className="flex-shrink-0 flex flex-col gap-1">
+                                                                <span className="text-slate-500 text-xs">现场照片</span>
+                                                                <img src={record.photoBase64} alt="患者照片" className="h-24 sm:h-32 w-auto object-cover rounded-lg border border-slate-200 shadow-sm" onClick={() => {
+                                                                    // 简单的点击查看大图
+                                                                    const w = window.open("");
+                                                                    w.document.write(`<img src="${record.photoBase64}" style="max-width:100%; height:auto;">`);
+                                                                }} title="点击查看大图" style={{cursor: 'zoom-in'}}/>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        )}
+
+                        {/* 3. 数据分析面板 (仅管理员可见) */}
+                        {activeTab === 'analysis' && user.role === 'admin' && (
+                            <div className="space-y-4">
+                                <div className="bg-blue-600 text-white p-6 rounded-2xl shadow-sm mb-6 flex items-center justify-between">
+                                    <div>
+                                        <h2 className="text-xl font-bold mb-1">术后不良反应监控视图</h2>
+                                        <p className="text-blue-100 text-sm">系统根据填报的“手术术式”自动分类，监控不良症状发生率。</p>
+                                    </div>
+                                    <i className="fas fa-chart-area text-4xl text-blue-400/50"></i>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {renderAnalytics()}
+                                </div>
+                            </div>
+                        )}
+
+                    </main>
+
+                    {showToast && (
+                        <div className="fixed bottom-6 right-6 bg-slate-800 text-white px-6 py-3 rounded-lg shadow-xl flex items-center gap-3 animate-fade-in-up">
+                            <i className="fas fa-check-circle text-green-400"></i>
+                            <span>保存成功！</span>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
+
+
